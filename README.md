@@ -1,7 +1,5 @@
 # Kakao_TechForImpact
 
-# 📅 Development Roadmap
-
 ## Week 1 — Setup & Data Understanding
 
 ### Goal
