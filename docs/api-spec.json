@@ -1,0 +1,147 @@
+{
+  "version": "0.1.0",
+  "base_url_local": "http://127.0.0.1:8000",
+  "content_type": "application/json",
+  "modes": ["노약자", "반려동물", "일반"],
+  "geojson_coordinate_order": "[lng, lat]",
+  "api_contract_status": "fixed_for_frontend_dummy_integration",
+  "endpoints": {
+    "healthcheck": {
+      "method": "GET",
+      "path": "/healthcheck",
+      "description": "서버 상태 확인",
+      "request": null,
+      "response": {
+        "status": "ok"
+      }
+    },
+    "create_route": {
+      "method": "POST",
+      "path": "/route",
+      "description": "mode, start, end를 받아 더미 그래프 기준 시원한 경로 한 개를 계산한다.",
+      "request": {
+        "mode": "노약자 | 반려동물 | 일반",
+        "start": [37.3219, 127.0972],
+        "end": [37.3247, 127.1245]
+      },
+      "response": {
+        "path": {
+          "type": "FeatureCollection",
+          "features": [
+            {
+              "type": "Feature",
+              "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                  [127.0972, 37.3219],
+                  [127.101, 37.3232]
+                ]
+              },
+              "properties": {
+                "mode": "일반",
+                "heat_score": 0.32,
+                "distance_m": 365.8,
+                "temperature": 29.5,
+                "uv": 0.61,
+                "shade_ratio": 0.55,
+                "wind": 0.45,
+                "ground_temp": 28.4,
+                "shelter_name": "수지도서관"
+              }
+            }
+          ]
+        },
+        "heat_score_avg": 0.317,
+        "distance_m": 2494.6,
+        "shelters": [
+          {
+            "name": "수지도서관",
+            "lat": 37.3232,
+            "lng": 127.101,
+            "operating_hours": "09:00-18:00"
+          }
+        ],
+        "is_dummy": true
+      }
+    },
+    "list_routes": {
+      "method": "GET",
+      "path": "/routes",
+      "description": "추천 경로 목록을 조회한다. mode query가 없으면 13개 전체를 반환한다.",
+      "query": {
+        "mode": "노약자 | 반려동물 | 일반 | optional"
+      },
+      "examples": {
+        "all": "GET /routes",
+        "by_mode": "GET /routes?mode=노약자"
+      },
+      "response": [
+        {
+          "id": 1,
+          "name": "수지구청 -> 죽전역 쉼터 경유",
+          "mode": "노약자",
+          "heat_score_avg": 0.317,
+          "distance_m": 2494.6,
+          "geojson": {
+            "type": "FeatureCollection",
+            "features": [
+              {
+                "type": "Feature",
+                "geometry": {
+                  "type": "LineString",
+                  "coordinates": [
+                    [127.0972, 37.3219],
+                    [127.101, 37.3232]
+                  ]
+                },
+                "properties": {
+                  "mode": "노약자",
+                  "heat_score": 0.32,
+                  "distance_m": 365.8,
+                  "temperature": 29.5,
+                  "uv": 0.61,
+                  "shade_ratio": 0.55,
+                  "wind": 0.45,
+                  "ground_temp": 28.4,
+                  "shelter_name": "수지도서관"
+                }
+              }
+            ]
+          },
+          "shelters": [
+            {
+              "name": "수지도서관",
+              "lat": 37.3232,
+              "lng": 127.101,
+              "operating_hours": "09:00-18:00"
+            }
+          ],
+          "is_dummy": true
+        }
+      ]
+    }
+  },
+  "frontend_notes": [
+    "POST /route의 request 좌표는 [lat, lng] 순서다.",
+    "GeoJSON coordinates는 표준대로 [lng, lat] 순서다.",
+    "한글 mode를 query string으로 보낼 때는 브라우저 fetch 또는 URLSearchParams를 사용하면 자동 인코딩된다.",
+    "is_dummy가 true이면 아직 실데이터가 아닌 더미 라우팅 응답이다."
+  ],
+  "data_contract": {
+    "document": "docs/DATA_CONTRACT.md",
+    "sample_nodes_with_score": "data/sample/nodes_with_score.geojson",
+    "sample_shelters": "data/sample/shelters.json"
+  },
+  "routing_policy": {
+    "document": "docs/ROUTING_POLICY.md",
+    "route_specs": "data/route_specs.json",
+    "pet_ground_temp_limit": 28.0
+  },
+  "handoff": {
+    "document": "docs/TEAM_HANDOFF.md"
+  },
+  "backend_loader": {
+    "module": "app/services/geojson_loader.py",
+    "functions": ["load_graph_from_geojson", "load_shelters"]
+  }
+}

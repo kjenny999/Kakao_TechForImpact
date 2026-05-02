@@ -278,13 +278,22 @@ project/
 
 ---
 
-## 🔌 API 명세 (예정)
+## 🔌 API 명세
+
+팀 공유용 고정 JSON 문서는 `docs/api-spec.json`입니다.
+
+- 로컬 기본 주소: `http://127.0.0.1:8000`
+- 요청 좌표: `[lat, lng]`
+- GeoJSON 좌표: `[lng, lat]`
+- mode: `"노약자" | "반려동물" | "일반"`
+- 상세 문서: `docs/API_SPEC.md`
+- A -> B 데이터 계약: `docs/DATA_CONTRACT.md`
 
 ### POST /route
 
 경로 한 개 계산
 
-```
+```json
 요청
 {
   "mode": "노약자 | 반려동물 | 일반",
@@ -294,10 +303,21 @@ project/
 
 응답
 {
-  "path": GeoJSON FeatureCollection,
+  "path": {
+    "type": "FeatureCollection",
+    "features": []
+  },
   "heat_score_avg": 0.31,
   "distance_m": 1240,
-  "shelters": [{"name": "수지도서관", "lat": ..., "lng": ...}]
+  "shelters": [
+    {
+      "name": "수지도서관",
+      "lat": 37.3232,
+      "lng": 127.101,
+      "operating_hours": "09:00-18:00"
+    }
+  ],
+  "is_dummy": true
 }
 ```
 
@@ -305,7 +325,7 @@ project/
 
 추천 경로 목록 조회
 
-```
+```json
 요청
 GET /routes?mode=노약자
 
@@ -317,7 +337,12 @@ GET /routes?mode=노약자
     "mode": "노약자",
     "heat_score_avg": 0.28,
     "distance_m": 1850,
-    "geojson": {...}
+    "geojson": {
+      "type": "FeatureCollection",
+      "features": []
+    },
+    "shelters": [],
+    "is_dummy": true
   },
   ...
 ]
@@ -327,7 +352,7 @@ GET /routes?mode=노약자
 
 서버 상태 확인
 
-```
+```json
 응답: { "status": "ok" }
 ```
 
@@ -345,3 +370,46 @@ GET /routes?mode=노약자
 | 6 | Heat Score 공식 더미 테스트 | A |
 | 7 | Dijkstra 로직 더미 테스트 | B |
 | 8 | 더미 Polyline + 툴팁 UI 틀 | C |
+
+---
+
+## 🟩 Backend MVP
+
+데이터 수령 전에도 C가 연동 테스트할 수 있도록 FastAPI 서버와 더미 NetworkX 라우팅 엔진을 먼저 제공합니다.
+
+### 실행
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 run_server.py
+```
+
+기본 주소: `http://127.0.0.1:8000`
+
+### 확인 API
+
+- `GET /healthcheck` -> `{ "status": "ok" }`
+- `POST /route` -> 더미 그래프 기반 최적 경로 GeoJSON 반환
+- `GET /routes?mode=노약자` -> 더미 추천 경로 목록 반환
+- Swagger 문서 -> `http://127.0.0.1:8000/docs`
+- 공유용 JSON 명세 -> `docs/api-spec.json`
+- A 입력 데이터 계약 -> `docs/DATA_CONTRACT.md`
+- 라우팅 정책 -> `docs/ROUTING_POLICY.md`
+- 배포 문서 -> `docs/DEPLOYMENT.md`
+- 팀 전달 문서 -> `docs/TEAM_HANDOFF.md`
+- 추천 경로 정의 -> `data/route_specs.json`
+- 샘플 데이터 -> `data/sample/nodes_with_score.geojson`, `data/sample/shelters.json`
+
+### 테스트
+
+```bash
+python3 -m pytest
+```
+
+입력 파일 검증:
+
+```bash
+python3 scripts/validate_inputs.py
+```
+
+현재 `/route`, `/routes` 응답에는 `"is_dummy": true`가 포함됩니다. A의 `nodes_with_score.geojson`을 `data/geojson/nodes_with_score.geojson`에 넣으면 `/route`는 자동으로 해당 파일을 우선 사용합니다.
