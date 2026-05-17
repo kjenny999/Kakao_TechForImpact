@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Iterable
 
 import networkx as nx
 
 from app.services.geo import Coordinate, haversine_m
-from app.services.geojson_loader import load_graph_from_geojson
+from app.services.geojson_loader import load_graph_from_geojson, load_graph_from_nodes_and_edges
 
 MODES = ("노약자", "반려동물", "일반")
 BASE_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_GRAPH_PATH = BASE_DIR / "data/geojson/nodes_with_score.geojson"
+NODES_PATH = BASE_DIR / "data/nodes_with_score.geojson"
+EDGES_PATH = BASE_DIR / "data/sujiku_edges.geojson"
+SHELTERS_PATH = BASE_DIR / "data/sample/shelters.json"
+LEGACY_GRAPH_PATH = BASE_DIR / "data/geojson/nodes_with_score.geojson"
 ROUTE_SPECS_PATH = BASE_DIR / "data/route_specs.json"
 PET_GROUND_TEMP_LIMIT = 28.0
+
+_graph_cache: tuple[nx.Graph, bool] | None = None
+_recommended_routes_cache: dict[str, list[dict]] = {}
 
 
 def build_dummy_graph() -> nx.Graph:
@@ -45,9 +52,17 @@ def build_dummy_graph() -> nx.Graph:
 
 
 def load_route_graph() -> tuple[nx.Graph, bool]:
-    if DEFAULT_GRAPH_PATH.exists():
-        return load_graph_from_geojson(DEFAULT_GRAPH_PATH), False
-    return build_dummy_graph(), True
+    global _graph_cache
+    if _graph_cache is not None:
+        return _graph_cache
+    if NODES_PATH.exists() and EDGES_PATH.exists():
+        result = load_graph_from_nodes_and_edges(NODES_PATH, EDGES_PATH, SHELTERS_PATH), False
+    elif LEGACY_GRAPH_PATH.exists():
+        result = load_graph_from_geojson(LEGACY_GRAPH_PATH), False
+    else:
+        result = build_dummy_graph(), True
+    _graph_cache = result
+    return result
 
 
 def add_edge(graph: nx.Graph, source: str, target: str, **attrs: float | str) -> None:
@@ -62,33 +77,23 @@ def edge_weight(mode: str, attrs: dict) -> float:
     shade = float(attrs["shade_ratio"])
     wind = float(attrs["wind"])
     ground_temp = float(attrs["ground_temp"])
-    shelter_bonus = 0.25 if attrs.get("shelter_name") else 0.0
+    shelter_bonus = 2.0 if attrs.get("shelter_name") else 0.0
 
+    # heat_score는 ~16-29, shade는 0-1, wind는 0-5 m/s 범위
+    # 계수 조정: shade/wind가 경로 선택에 실질적 영향을 주도록
     if mode == "노약자":
-        comfort_penalty = heat * 1.8 - shade * 0.35 - shelter_bonus
+        comfort_penalty = heat * 0.5 - shade * 8.0 - shelter_bonus
     elif mode == "반려동물":
-        hot_ground_penalty = 2.5 if ground_temp > 28.0 else 0.0
-        comfort_penalty = heat * 1.4 + hot_ground_penalty - shade * 0.15
+        hot_ground_penalty = 12.0 if ground_temp > PET_GROUND_TEMP_LIMIT else 0.0
+        comfort_penalty = heat * 0.5 + hot_ground_penalty - shade * 4.0
     else:
-        comfort_penalty = heat * 1.2 - shade * 0.20 - wind * 0.15
+        comfort_penalty = heat * 0.5 - shade * 3.0 - wind * 0.5
 
     return distance * max(0.1, 1 + comfort_penalty)
 
 
 def graph_for_mode(graph: nx.Graph, mode: str) -> nx.Graph:
-    if mode != "반려동물":
-        return graph
-
-    filtered = graph.copy()
-    hot_edges = [
-        (source, target)
-        for source, target, attrs in filtered.edges(data=True)
-        if float(attrs.get("ground_temp", 0)) > PET_GROUND_TEMP_LIMIT
-    ]
-    filtered.remove_edges_from(hot_edges)
-    if filtered.number_of_edges() == 0:
-        return graph
-    return filtered
+    return graph
 
 
 def nearest_node(graph: nx.Graph, coord: Coordinate) -> str:
@@ -202,6 +207,10 @@ def shortest_cool_route(mode: str, start: Coordinate, end: Coordinate) -> dict:
 
 
 def get_recommended_routes(mode: str | None = None) -> list[dict]:
+    cache_key = mode or "__all__"
+    if cache_key in _recommended_routes_cache:
+        return deepcopy(_recommended_routes_cache[cache_key])
+
     routes = []
     for spec in load_route_specs():
         route_mode = spec["mode"]
@@ -222,7 +231,14 @@ def get_recommended_routes(mode: str | None = None) -> list[dict]:
                 "is_dummy": result["is_dummy"],
             }
         )
-    return routes
+    _recommended_routes_cache[cache_key] = routes
+    return deepcopy(routes)
+
+
+def clear_route_caches() -> None:
+    global _graph_cache
+    _graph_cache = None
+    _recommended_routes_cache.clear()
 
 
 def load_route_specs(path: Path = ROUTE_SPECS_PATH) -> list[dict]:
@@ -248,25 +264,23 @@ def pairwise(items: list[str]) -> Iterable[tuple[str, str]]:
 def to_feature_collection(graph: nx.Graph, edges: list[tuple[str, str]], edge_attrs: list[dict], mode: str) -> dict:
     features = []
     for (source, target), attrs in zip(edges, edge_attrs):
+        coordinates = attrs.get("coordinates") or [
+            [graph.nodes[source]["lng"], graph.nodes[source]["lat"]],
+            [graph.nodes[target]["lng"], graph.nodes[target]["lat"]],
+        ]
         features.append(
             {
                 "type": "Feature",
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": [
-                        [graph.nodes[source]["lng"], graph.nodes[source]["lat"]],
-                        [graph.nodes[target]["lng"], graph.nodes[target]["lat"]],
-                    ],
-                },
+                "geometry": {"type": "LineString", "coordinates": coordinates},
                 "properties": {
                     "mode": mode,
-                    "heat_score": attrs["heat_score"],
+                    "heat_score": round(float(attrs["heat_score"]), 3),
                     "distance_m": round(float(attrs["distance_m"]), 1),
-                    "temperature": attrs["temperature"],
-                    "uv": attrs.get("uv"),
-                    "shade_ratio": attrs["shade_ratio"],
-                    "wind": attrs["wind"],
-                    "ground_temp": attrs["ground_temp"],
+                    "temperature": round(float(attrs["temperature"]), 2),
+                    "uv": round(float(attrs.get("uv", 0.0)), 3),
+                    "shade_ratio": round(float(attrs["shade_ratio"]), 3),
+                    "wind": round(float(attrs["wind"]), 3),
+                    "ground_temp": round(float(attrs["ground_temp"]), 2),
                     "shelter_name": attrs.get("shelter_name"),
                 },
             }
